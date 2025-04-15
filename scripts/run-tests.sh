@@ -25,24 +25,32 @@ set -EC
 GIT=${GIT:-"/usr/bin/git"}
 
 # Service control
-MONGO_ON=${MONGO_ON:-"service mongod onestart"}
-MONGO_OFF=${MONGO_OFF:-"service mongod onestop"}
+# MONGO_ON=${MONGO_ON:-"service mongod onestart"}
+# MONGO_OFF=${MONGO_OFF:-"service mongod onestop"}
 
-PG_ON=${PG_ON:-"service postgresql onestart"}
-PG_OFF=${PG_OFF:-"service postgresql onestop"}
+# PG_ON=${PG_ON:-"service postgresql onestart"}
+# PG_OFF=${PG_OFF:-"service postgresql onestop"}
+
+MONGO_ON=${MONGO_ON:-"brew services start mongodb-community"}
+MONGO_OFF=${MONGO_OFF:-"brew services stop mongodb-community"}
+
+PG_ON=${PG_ON:-"brew services start postgresql@17"}
+PG_OFF=${PG_OFF:-"brew services stop postgresql@17"}
 
 # Mongo config
 MONGO_CONN=${MONGO_CONN:-"mongodb://127.0.0.1/test"} # MongoDB connection string
-MONGO_SHELL=${MONGO_SHELL:-"/usr/local/bin/mongo $MONGO_CONN"}
+# MONGO_SHELL=${MONGO_SHELL:-"/usr/local/bin/mongo $MONGO_CONN"}
+MONGO_SHELL=${MONGO_SHELL:-"/opt/homebrew/bin/mongosh $MONGO_CONN"}
 MONGO_SET_ARC=${MONGO_SET_ARC:-""}
 
 # Postgres config
-PG_SHELL=${PG_SHELL:-"/usr/local/bin/psql --dbname test"} #DB name must match below
+# PG_SHELL=${PG_SHELL:-"/usr/local/bin/psql --dbname test"} #DB name must match below
+PG_SHELL=${PG_SHELL:-"/opt/homebrew/opt/postgresql@17/bin/psql --dbname=test"}
 PG_CONN=${PG_CONN:-"postgres://127.0.0.1/test?sslmode=disable;binary_parameters=yes"}
 PG_SET_ARC=${PG_SET_ARC:-""}
 
 # Benchmark config
-BENCH_TOOL=${BENCH_TOOL:-"./mpjbt"}
+BENCH_TOOL=${BENCH_TOOL:-"../mpjbt"}
 WORKERS=${WORKERS:-30}
 PADDING=${PADDING:-""}
 
@@ -119,8 +127,6 @@ reset_mongo() {
 # reset_postgres drops the test table and indexes and then recreates them.
 reset_postgres() {
 	$PG_SHELL -c "DROP TABLE $TABLE_NAME;"  || true
-	$PG_SHELL -c "DROP INDEX idx_json_data;"  || true
-	$PG_SHELL -c "DROP INDEX idx_json_data_age;"  || true
 
 	$PG_SHELL -c "CREATE TABLE $TABLE_NAME (data jsonb);"
 	$PG_SHELL -c "CREATE INDEX idx_json_data ON $TABLE_NAME USING BTREE ((data->'id'));"
@@ -170,7 +176,19 @@ eval $MONGO_OFF || true
 
 eval $MONGO_SET_ARC
 eval $MONGO_ON
-sleep 10
+echo "⏳ Waiting for MongoDB to start..."
+sleep 5
+
+# Wait up to 15 seconds for mongod to be ready
+for i in {1..15}; do
+	if mongosh --quiet --eval "db.runCommand({ ping: 1 })" >/dev/null 2>&1; then
+		echo "✅ MongoDB is up!"
+		break
+	else
+		echo "⌛ Still waiting for MongoDB... ($i)"
+		sleep 1
+	fi
+done
 reset_mongo
 
 # Write mongo config - thanks stack overflow!
@@ -180,25 +198,9 @@ $MONGO_SHELL \
 	--eval "db=db.getSiblingDB('admin');db.admin.runCommand({getCmdLineOpts:1})" \
 	> $OUTPUT_DIR/config-mongo.txt
 
-run_test "insert" $MONGO_CONN
-run_test "select-zipfian" $MONGO_CONN
-run_test "select-uniform" $MONGO_CONN
 
-reset_mongo
 run_test "insert" $MONGO_CONN
 OPS_COUNT=$UPDATE_COUNT run_test "insert-update" $MONGO_CONN
-
-reset_mongo
-run_test "insert" $MONGO_CONN
-run_test "insert5-select95" $MONGO_CONN
-
-reset_mongo
-run_test "insert" $MONGO_CONN
-OPS_COUNT=$UPDATE_COUNT run_test "select-update-uniform" $MONGO_CONN
-
-reset_mongo
-run_test "insert" $MONGO_CONN
-OPS_COUNT=$UPDATE_COUNT run_test "select-update-zipfian" $MONGO_CONN
 
 reset_mongo
 run_test "insert" $MONGO_CONN
@@ -210,7 +212,11 @@ OPS_COUNT=$UPDATE_COUNT run_test "update-uniform" $MONGO_CONN
 
 reset_mongo
 run_test "insert" $MONGO_CONN
-run_test "read-range" $MONGO_CONN
+OPS_COUNT=$UPDATE_COUNT run_test "select-update-uniform" $MONGO_CONN
+
+reset_mongo
+run_test "insert" $MONGO_CONN
+OPS_COUNT=$UPDATE_COUNT run_test "select-update-zipfian" $MONGO_CONN
 
 
 #############################################
@@ -226,25 +232,9 @@ reset_postgres
 # Write postgres config to file
 $PG_SHELL -c "SHOW ALL;" > $OUTPUT_DIR/config-postgres.txt
 
-run_test "insert" $PG_CONN
-run_test "select-zipfian" $PG_CONN
-run_test "select-uniform" $PG_CONN
-
 reset_postgres
 run_test "insert" $PG_CONN
 OPS_COUNT=$UPDATE_COUNT run_test "insert-update" $PG_CONN
-
-reset_postgres
-run_test "insert" $PG_CONN
-run_test "insert5-select95" $PG_CONN
-
-reset_postgres
-run_test "insert" $PG_CONN
-OPS_COUNT=$UPDATE_COUNT run_test "select-update-uniform" $PG_CONN
-
-reset_postgres
-run_test "insert" $PG_CONN
-OPS_COUNT=$UPDATE_COUNT run_test "select-update-zipfian" $PG_CONN
 
 reset_postgres
 run_test "insert" $PG_CONN
@@ -256,4 +246,8 @@ OPS_COUNT=$UPDATE_COUNT run_test "update-uniform" $PG_CONN
 
 reset_postgres
 run_test "insert" $PG_CONN
-run_test "read-range" $PG_CONN
+OPS_COUNT=$UPDATE_COUNT run_test "select-update-uniform" $PG_CONN
+
+reset_postgres
+run_test "insert" $PG_CONN
+OPS_COUNT=$UPDATE_COUNT run_test "select-update-zipfian" $PG_CONN
