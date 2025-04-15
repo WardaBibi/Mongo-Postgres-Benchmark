@@ -63,7 +63,7 @@ UPDATE_COUNT=${UPDATE_COUNT:-10000}
 # Script vars
 TEST_NAME=$1
 TABLE_NAME=$(echo $TEST_NAME | tr -cd '[a-zA-Z0-9]')
-OUTPUT_DIR="./output/$TEST_NAME"
+OUTPUT_DIR="./Benchmark-results/$TEST_NAME"
 
 # Ensure we have a test name
 if [ "$#" -ne 1 ]; then
@@ -127,6 +127,8 @@ reset_mongo() {
 # reset_postgres drops the test table and indexes and then recreates them.
 reset_postgres() {
 	$PG_SHELL -c "DROP TABLE $TABLE_NAME;"  || true
+	$PG_SHELL -c "DROP INDEX idx_json_data;"  || true
+	$PG_SHELL -c "DROP INDEX idx_json_data_age;"  || true
 
 	$PG_SHELL -c "CREATE TABLE $TABLE_NAME (data jsonb);"
 	$PG_SHELL -c "CREATE INDEX idx_json_data ON $TABLE_NAME USING BTREE ((data->'id'));"
